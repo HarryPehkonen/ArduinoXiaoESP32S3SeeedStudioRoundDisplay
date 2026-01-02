@@ -127,23 +127,40 @@ renderFace(time_secs);
 
 ## Backlight Control
 
-**Pin:** GPIO1 (D6 on XIAO)
-**Logic:** *Testing in progress* - may be inverted (HIGH = off) or require different pin
+**Pin:** GPIO43 (D6 on XIAO)
+**Logic:** Normal (HIGH = on, LOW = off)
+**Hardware switch:** KE switch on board must be ON for software control
 
-**Current implementation:**
+**CRITICAL:** The "KE switch" on the board must be set to ON. When OFF, the backlight stays on regardless of GPIO state.
+
+**Implementation:**
 ```cpp
-const int TFT_BL_PIN = 1;
+const int TFT_BL_PIN = 43;  // GPIO43 = D6 on XIAO
 
-// Sleep mode
-digitalWrite(TFT_BL_PIN, HIGH);  // Testing: HIGH = off
+void setup() {
+  pinMode(TFT_BL_PIN, OUTPUT);
+  digitalWrite(TFT_BL_PIN, HIGH);  // Backlight ON
+}
 
-// Wake mode
-digitalWrite(TFT_BL_PIN, LOW);   // Testing: LOW = on
+// Sleep mode - turn off backlight
+void enterSleep() {
+  digitalWrite(TFT_BL_PIN, LOW);   // Backlight OFF
+}
+
+// Wake mode - turn on backlight
+void wakeFromSleep() {
+  digitalWrite(TFT_BL_PIN, HIGH);  // Backlight ON
+}
 ```
 
-**Note:** If backlight doesn't respond, try:
-- Inverted logic (swap HIGH/LOW)
-- Different pins: GPIO21, GPIO20, GPIO22
+**PWM brightness control** (if supported by hardware):
+```cpp
+analogWrite(TFT_BL_PIN, 255);  // Full brightness
+analogWrite(TFT_BL_PIN, 128);  // 50% brightness
+analogWrite(TFT_BL_PIN, 0);    // Off
+```
+
+**Note:** On XIAO ESP32S3, D6 maps to GPIO43 (NOT GPIO6). Do not use GPIO19/GPIO20 as they are reserved for USB.
 
 ---
 
@@ -193,25 +210,26 @@ float voltage = (analogReadMilliVolts(BAT_PIN) * BATTERY_VOLTAGE_DIVIDER) / 1000
 | Touch (CHSC6X) | I2C 0x2E | Reset on GPIO9 (shared!) |
 | RTC (BM8563) | I2C 0x51 | Persistent timekeeping |
 | Battery ADC | D0 | 2:1 voltage divider |
-| Backlight | GPIO1 (D6) | Logic TBD |
+| Backlight | GPIO43 (D6) | HIGH=on, LOW=off. KE switch must be ON |
 
 ---
 
 ## Initialization Order (Critical!)
 
 1. Battery pin setup
-2. **Touch controller hardware reset** (GPIO9 as output)
-3. **Display initialization** (GPIO9 becomes SPI MOSI)
-4. Sprite creation
-5. Font loading
-6. Initial render (optional)
-7. WiFi connection
-8. NTP sync with polling
-9. RTC initialization
-10. **Sprite recreation** (post-WiFi cleanup)
-11. Touch controller software init (no pin manipulation)
-12. Battery reading
-13. Final render with correct time
+2. **Backlight pin setup** (GPIO43/D6 as output, set HIGH for on)
+3. **Touch controller hardware reset** (GPIO9 as output)
+4. **Display initialization** (GPIO9 becomes SPI MOSI)
+5. Sprite creation
+6. Font loading
+7. Initial render (optional)
+8. WiFi connection
+9. NTP sync with polling
+10. RTC initialization
+11. **Sprite recreation** (post-WiFi cleanup)
+12. Touch controller software init (no pin manipulation)
+13. Battery reading
+14. Final render with correct time
 
 **Violating this order will cause display freeze or touch malfunction.**
 
@@ -230,7 +248,8 @@ float voltage = (analogReadMilliVolts(BAT_PIN) * BATTERY_VOLTAGE_DIVIDER) / 1000
 
 ## References
 
-- [Seeed Studio XIAO Round Display Wiki](https://wiki.seeedstudio.com/get_started_round_display_xiao/)
+- [Seeed Studio XIAO Round Display Getting Started](https://wiki.seeedstudio.com/get_started_round_display_xiao/)
+- [Seeed Studio Round Display Usage Guide](https://wiki.seeedstudio.com/seeedstudio_round_display_usage/)
 - [GC9A01 Display Driver Datasheet](https://www.waveshare.com/w/upload/5/5e/GC9A01A.pdf)
 - [CHSC6X Touch Controller](https://github.com/Xinyuan-LilyGO/T-Display-S3-Long/blob/main/doc/CST816S_DataSheet_EN.pdf)
 - [TFT_eSPI Library](https://github.com/Bodmer/TFT_eSPI)

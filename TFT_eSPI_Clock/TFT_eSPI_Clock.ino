@@ -28,7 +28,7 @@ float battery_voltage = 0;
 bool is_charging = false;
 
 // Display backlight control
-const int TFT_BL_PIN = 1;  // Backlight pin (GPIO1/D6 on XIAO Round Display)
+const int TFT_BL_PIN = 43;  // Backlight pin (GPIO43 = D6 on XIAO Round Display)
 
 // Touch controller configuration
 const int TOUCH_RST_PIN = 9;
@@ -99,7 +99,7 @@ void setup() {
 
   // Initialize backlight control
   pinMode(TFT_BL_PIN, OUTPUT);
-  digitalWrite(TFT_BL_PIN, LOW);   // Turn on backlight (inverted logic)
+  digitalWrite(TFT_BL_PIN, HIGH);
 
   // ----------------------------------------------------------------
   // 1. TOUCH CONTROLLER HARDWARE RESET (CRITICAL - BEFORE DISPLAY)
@@ -646,7 +646,8 @@ void enterSleep() {
 
   // Try inverted logic and add debug
   Serial.println("Setting backlight pin HIGH to turn OFF");
-  digitalWrite(TFT_BL_PIN, HIGH);  // Try HIGH = off
+  digitalWrite(TFT_BL_PIN, LOW);
+  Serial.println("Should now be off");
 
   // Configure touch as wake source (GPIO interrupt)
   // Note: For light sleep, we'll just turn off display and wait for touch
@@ -658,7 +659,8 @@ void wakeFromSleep() {
 
   // Try inverted logic and add debug
   Serial.println("Setting backlight pin LOW to turn ON");
-  digitalWrite(TFT_BL_PIN, LOW);   // Try LOW = on
+  digitalWrite(TFT_BL_PIN, HIGH);
+  Serial.println("Should now be on");
 
   tft.init();
   tft.setRotation(0);
