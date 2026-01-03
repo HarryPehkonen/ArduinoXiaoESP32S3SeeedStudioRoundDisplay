@@ -250,6 +250,7 @@ float voltage = (analogReadMilliVolts(BAT_PIN) * BATTERY_VOLTAGE_DIVIDER) / 1000
 
 - [Seeed Studio XIAO Round Display Getting Started](https://wiki.seeedstudio.com/get_started_round_display_xiao/)
 - [Seeed Studio Round Display Usage Guide](https://wiki.seeedstudio.com/seeedstudio_round_display_usage/)
+- [Hardware Schematics (SCH & PCB)](https://files.seeedstudio.com/wiki/round_display_for_xiao/SeeedStudio_Round_Display_for_XIAO_v1.0_SCH&PCB_230308.zip)
 - [GC9A01 Display Driver Datasheet](https://www.waveshare.com/w/upload/5/5e/GC9A01A.pdf)
 - [CHSC6X Touch Controller](https://github.com/Xinyuan-LilyGO/T-Display-S3-Long/blob/main/doc/CST816S_DataSheet_EN.pdf)
 - [TFT_eSPI Library](https://github.com/Bodmer/TFT_eSPI)

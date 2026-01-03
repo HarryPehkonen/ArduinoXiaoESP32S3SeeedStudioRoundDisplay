@@ -14,6 +14,7 @@ const char *password = "abracadabra";
 
 #include "I2C_BM8563.h"
 #include "NotoSansBold15.h"
+#include "SparkFun_LSM6DSV16X.h"
 
 I2C_BM8563 rtc(I2C_BM8563_DEFAULT_ADDRESS, Wire);
 I2C_BM8563_TimeTypeDef timeStruct;
@@ -42,6 +43,14 @@ TouchPoint touch = {false, 0, 0};
 
 // Touch zones
 enum TouchZone { ZONE_LEFT, ZONE_CENTER, ZONE_RIGHT, ZONE_NONE };
+
+// IMU (accelerometer + gyroscope) configuration
+SparkFun_LSM6DSV16X imu;
+sfe_lsm_data_t accelData;
+sfe_lsm_data_t gyroData;
+bool imuInitialized = false;
+float accelX = 0.0f;  // X-axis acceleration for tilt display
+float accelY = 0.0f;  // Y-axis acceleration for tilt display
 
 // UI State machine
 enum UIState { STATE_NORMAL, STATE_MENU, STATE_SLEEP };
@@ -195,6 +204,34 @@ void setup() {
   // Initialize touch controller
   initTouch();
 
+  // Initialize IMU (accelerometer + gyroscope)
+  Serial.println("Initializing IMU...");
+  if (imu.begin()) {
+    // Reset device to default settings
+    imu.deviceReset();
+    while (!imu.getDeviceReset()) {
+      delay(1);
+    }
+
+    // Configure IMU
+    imu.enableBlockDataUpdate();
+    imu.setAccelDataRate(LSM6DSV16X_ODR_AT_120Hz);
+    imu.setAccelFullScale(LSM6DSV16X_2g);
+    imu.setGyroDataRate(LSM6DSV16X_ODR_AT_120Hz);
+    imu.setGyroFullScale(LSM6DSV16X_250dps);
+    imu.enableFilterSettling();
+    imu.enableAccelLP2Filter();
+    imu.setAccelLP2Bandwidth(LSM6DSV16X_XL_STRONG);
+    imu.enableGyroLP1Filter();
+    imu.setGyroLP1Bandwidth(LSM6DSV16X_GY_ULTRA_LIGHT);
+
+    imuInitialized = true;
+    Serial.println("IMU initialized (120 Hz, ±2g, ±250dps)");
+  } else {
+    Serial.println("WARNING: IMU not found - continuing without IMU");
+    imuInitialized = false;
+  }
+
   // Initial battery reading
   battery_voltage = readBatteryVoltage();
   Serial.printf("Initial battery: %.2fV\n", battery_voltage);
@@ -204,6 +241,8 @@ void setup() {
   renderFace(time_secs);
   Serial.printf("Setup complete - time is %02d:%02d:%02d\n",
                 (int)(time_secs/3600)%24, (int)(time_secs/60)%60, (int)time_secs%60);
+
+  scanI2C();
 }
 
 // =========================================================================
@@ -315,6 +354,16 @@ void loop() {
     syncTime();
   }
 
+  // Read IMU data (if available and initialized)
+  if (imuInitialized && imu.checkStatus()) {
+    imu.getAccel(&accelData);
+
+    // Convert from mg to g (1g = 1000mg) and apply smoothing
+    const float alpha = 0.1f;  // Reduced from 0.2 for more smoothing
+    accelX = alpha * (accelData.xData / 1000.0f) + (1.0f - alpha) * accelX;
+    accelY = alpha * (accelData.yData / 1000.0f) + (1.0f - alpha) * accelY;
+  }
+
   // Update battery voltage and charging state
   updateBatteryState();
 }
@@ -393,6 +442,90 @@ static void renderFace(float t) {
   snprintf(voltageStr, sizeof(voltageStr), "%.2fV", battery_voltage);
   face.drawString(percentageStr, CLOCK_R, CLOCK_R * 0.62);
   face.drawString(voltageStr, CLOCK_R, CLOCK_R * 0.50);
+
+  // IMU tilt indicator - line shows tilt direction like a spirit level
+  if (imuInitialized) {
+    // Calculate Z-axis value (for total magnitude)
+    float accelZ = accelData.zData / 1000.0f;
+
+    // Calculate total 3D magnitude (should be ~1.0g when stationary)
+    float totalMag = sqrt(accelX * accelX + accelY * accelY + accelZ * accelZ);
+
+    // Calculate tilt in XY plane (how far from level)
+    float tiltMag = sqrt(accelX * accelX + accelY * accelY);
+
+    // Draw line at top of clock showing tilt direction
+    float lineLength = 30.0f;  // Length of tilt indicator line
+    float lineY = CLOCK_R * 0.25;  // Position near top of clock
+
+    float tiltAngle;
+    // Only show tilt angle if there's significant tilt (deadzone when flat)
+    if (tiltMag > 0.25f) {  // Increased from 0.15 for less sensitivity
+      // Calculate angle - negative to point "uphill" (opposite of gravity)
+      tiltAngle = atan2(-accelY, -accelX) * 180.0 / PI;
+    } else {
+      // Device is nearly flat - show horizontal line
+      tiltAngle = 0.0f;
+    }
+
+    // Calculate line endpoints based on tilt angle
+    float tiltRad = tiltAngle * PI / 180.0;
+    float x1 = CLOCK_R - lineLength * cos(tiltRad);
+    float y1 = lineY - lineLength * sin(tiltRad);
+    float x2 = CLOCK_R + lineLength * cos(tiltRad);
+    float y2 = lineY + lineLength * sin(tiltRad);
+
+    // Draw the tilt indicator line in cyan
+    face.drawWideLine(x1, y1, x2, y2, 3.0f, TFT_CYAN);
+
+    // Draw spirit level bubble at center of clock
+    // Bubble moves opposite to tilt (floats to high point)
+    // Non-linear response: halfway to edge at 1°, edge at 8°
+    const float bubbleScale = 88.0f;
+    const float tiltPower = 0.336f;  // Power < 1 amplifies small values
+
+    // Apply power function while preserving sign direction
+    float scaledX = copysign(bubbleScale * pow(abs(accelX), tiltPower), accelX);
+    float scaledY = copysign(bubbleScale * pow(abs(accelY), tiltPower), accelY);
+
+    float bubbleX = CLOCK_R - scaledX;  // Negative: bubble goes uphill
+    float bubbleY = CLOCK_R - scaledY;
+
+    // Constrain bubble to stay within container circle
+    float bubbleRadius = 50.0f;  // Container radius
+    float dx = bubbleX - CLOCK_R;
+    float dy = bubbleY - CLOCK_R;
+    float dist = sqrt(dx * dx + dy * dy);
+    if (dist > bubbleRadius - 10) {  // Keep bubble inside container (minus bubble size)
+      float scale = (bubbleRadius - 10) / dist;
+      bubbleX = CLOCK_R + dx * scale;
+      bubbleY = CLOCK_R + dy * scale;
+    }
+
+    // Draw outer level circle (the container)
+    face.drawCircle(CLOCK_R, CLOCK_R, bubbleRadius, TFT_DARKGREY);
+    face.drawCircle(CLOCK_R, CLOCK_R, bubbleRadius - 1, TFT_DARKGREY);  // Thicker
+
+    // Draw crosshairs to show center (perfect level)
+    face.drawLine(CLOCK_R - 10, CLOCK_R, CLOCK_R + 10, CLOCK_R, TFT_DARKGREY);
+    face.drawLine(CLOCK_R, CLOCK_R - 10, CLOCK_R, CLOCK_R + 10, TFT_DARKGREY);
+
+    // Draw the bubble (filled circle that moves)
+    face.fillCircle(bubbleX, bubbleY, 8, TFT_CYAN);
+    face.drawCircle(bubbleX, bubbleY, 8, TFT_WHITE);
+
+    // DEBUG: Show raw accelerometer values
+    face.setTextColor(TFT_WHITE, CLOCK_BG);
+    face.setTextDatum(TL_DATUM);  // Top-left alignment
+    char debugStr[40];
+    snprintf(debugStr, sizeof(debugStr), "X:%.2f Y:%.2f Z:%.2f ", accelX, accelY, accelZ);
+    //face.drawString(debugStr, 5, 5);
+    Serial.print(debugStr);
+    snprintf(debugStr, sizeof(debugStr), "Tot:%.2f Ang:%.1f XY:%.2f", totalMag, tiltAngle, tiltMag);
+    //face.drawString(debugStr, 5, 20);
+    Serial.println(debugStr);
+    face.setTextDatum(MC_DATUM);  // Reset to middle-center
+  }
 
   // Draw second hand
   getCoord(CLOCK_R, CLOCK_R, &xp, &yp, S_HAND_LENGTH, s_angle);
@@ -644,10 +777,16 @@ void enterSleep() {
   Serial.println("Entering sleep mode...");
   tft.fillScreen(TFT_BLACK);
 
-  // Try inverted logic and add debug
-  Serial.println("Setting backlight pin HIGH to turn OFF");
+  // Turn off backlight
   digitalWrite(TFT_BL_PIN, LOW);
-  Serial.println("Should now be off");
+  Serial.println("Backlight off");
+
+  // Power down IMU to save battery
+  if (imuInitialized) {
+    imu.setAccelDataRate(LSM6DSV16X_ODR_OFF);
+    imu.setGyroDataRate(LSM6DSV16X_ODR_OFF);
+    Serial.println("IMU powered down");
+  }
 
   // Configure touch as wake source (GPIO interrupt)
   // Note: For light sleep, we'll just turn off display and wait for touch
@@ -657,12 +796,33 @@ void enterSleep() {
 void wakeFromSleep() {
   Serial.println("Waking from sleep...");
 
-  // Try inverted logic and add debug
-  Serial.println("Setting backlight pin LOW to turn ON");
+  // Turn on backlight
   digitalWrite(TFT_BL_PIN, HIGH);
-  Serial.println("Should now be on");
+  Serial.println("Backlight on");
+
+  // Power up IMU
+  if (imuInitialized) {
+    imu.setAccelDataRate(LSM6DSV16X_ODR_AT_120Hz);
+    imu.setGyroDataRate(LSM6DSV16X_ODR_AT_120Hz);
+    Serial.println("IMU powered up");
+  }
 
   tft.init();
   tft.setRotation(0);
 }
 
+void scanI2C() {
+  uint8_t count = 0;
+  for (uint8_t addr = 1; addr < 127; addr++) {
+    Wire.beginTransmission(addr);
+    if (Wire.endTransmission() == 0) {
+      Serial.printf("  Device found at 0x%02X\n", addr);
+      count++;
+    }
+  }
+  if (count == 0) {
+    Serial.println("  No I2C devices found!");
+  } else {
+    Serial.printf("  Found %d device(s)\n", count);
+  }
+}
